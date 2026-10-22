@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>12小時與24小時報時制 - 卡牌記憶對對碰</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@600;700;800&family=Work+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#06D6A0',
+            background: '#F0FFF4',
+            cardBg: '#D1FAE5',
+            accent: '#EF476F',
+            foreground: '#064E3B',
+          },
+          fontFamily: {
+            heading: ['Quicksand', 'sans-serif'],
+            body: ['Work Sans', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #F0FFF4;
+      color: #064E3B;
+      font-family: 'Work Sans', sans-serif;
+      user-select: none;
+    }
+
+    .font-heading {
+      font-family: 'Quicksand', sans-serif;
+    }
+
+    /* 網格等高補正 */
+    #card-grid {
+      grid-auto-rows: 1fr;
+    }
+
+    /* 3D 卡牌翻轉容器 */
+    .card-container {
+      perspective: 1000px;
+    }
+
+    .card-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+      transform-style: preserve-3d;
+    }
+
+    .card-container.flipped .card-inner {
+      transform: rotateY(180deg);
+    }
+
+    .card-front, .card-back {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      backface-visibility: hidden;
+      border-radius: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 6px -1px rgba(6, 78, 59, 0.1), 0 2px 4px -1px rgba(6, 78, 59, 0.06);
+    }
+
+    /* 卡牌背面 */
+    .card-back {
+      background: linear-gradient(135deg, #06D6A0 0%, #05B386 100%);
+      border: 3px solid #FFFFFF;
+      transform: rotateY(0deg);
+    }
+
+    /* 卡牌正面 */
+    .card-front {
+      background-color: #FFFFFF;
+      border: 3px solid #06D6A0;
+      transform: rotateY(180deg);
+    }
+
+    /* 淡出隱藏（保持網格排版不塌陷） */
+    .card-matched {
+      transition: opacity 1s ease-out, visibility 1s;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+
+    /* 倒數警告閃爍 */
+    @keyframes blink {
+      0%, 100% { color: #EF476F; }
+      50% { color: #991B1B; opacity: 0.5; }
+    }
+    .timer-warning {
+      animation: blink 1s infinite;
+    }
+
+    /* 超大倒數數字彈跳出現動畫 */
+    @keyframes popIn {
+      0% {
+        transform: scale(0.2);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.2);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    .animate-pop {
+      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    /* 歡慶 Canvas */
+    #confetti-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 50;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between p-4 md:p-6">
+
+  <canvas id="confetti-canvas"></canvas>
+
+  <!-- 頂部標題與控制列 -->
+  <header class="w-full max-w-2xl flex flex-col items-center gap-2 mb-2">
+    <div class="w-full flex items-center justify-between">
+      <h1 class="text-xl md:text-3xl font-extrabold font-heading text-foreground flex items-center gap-2">
+        ⏰ 12/24小時制記憶對對碰
+      </h1>
+      <button id="sound-toggle" class="p-2 rounded-xl bg-white border-2 border-primary text-foreground font-bold hover:bg-cardBg transition shadow-sm text-xs md:text-base">
+        🔊 音效：開啟
+      </button>
+    </div>
+
+    <!-- 遊戲數據資訊欄 -->
+    <div class="w-full bg-white rounded-2xl p-3 shadow-md border border-emerald-100 flex justify-around items-center text-center">
+      <div>
+        <p class="text-xs text-gray-500 font-semibold">當前難度</p>
+        <span id="difficulty-display" class="text-xs md:text-sm font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+          困難 (4x4)
+        </span>
+      </div>
+      <div class="h-8 w-px bg-gray-200"></div>
+      <div>
+        <p class="text-xs text-gray-500 font-semibold">剩餘時間</p>
+        <p id="timer-display" class="text-xl md:text-2xl font-bold font-heading text-foreground">02:30</p>
+      </div>
+      <div class="h-8 w-px bg-gray-200"></div>
+      <div>
+        <p class="text-xs text-gray-500 font-semibold">翻牌步數</p>
+        <p id="moves-display" class="text-xl md:text-2xl font-bold font-heading text-foreground">0</p>
+      </div>
+      <div class="h-8 w-px bg-gray-200"></div>
+      <div>
+        <p class="text-xs text-gray-500 font-semibold">成功配對</p>
+        <p id="matches-display" class="text-xl md:text-2xl font-bold font-heading text-primary">0 / 8</p>
+      </div>
+      <div class="h-8 w-px bg-gray-200"></div>
+      
+      <div class="flex gap-1.5 flex-wrap justify-center">
+        <button id="pause-btn" class="px-2.5 py-2 bg-amber-100 border-2 border-amber-400 text-amber-900 font-bold rounded-xl hover:bg-amber-200 transition shadow-sm text-xs md:text-sm">
+          ⏸️ 暫停
+        </button>
+        <button id="header-menu-btn" class="px-2.5 py-2 bg-emerald-100 border-2 border-primary text-foreground font-bold rounded-xl hover:bg-emerald-200 transition shadow-sm text-xs md:text-sm">
+          🏠 主選單
+        </button>
+        <button id="restart-btn" class="px-3 py-2 bg-accent text-white font-bold rounded-xl shadow hover:opacity-90 active:scale-95 transition text-xs md:text-sm">
+          重新開始
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 記憶階段橫幅 -->
+  <div id="memory-banner" class="w-full max-w-2xl bg-amber-100 border-2 border-amber-400 rounded-2xl p-3 mb-3 flex flex-col gap-2 shadow-md hidden">
+    <div class="flex justify-between items-center">
+      <span class="font-bold text-amber-900 flex items-center gap-1 text-sm md:text-base">
+        💡 記憶階段：請記下卡牌位置！（倒數 <span id="memory-countdown" class="text-xl font-heading text-accent font-extrabold">30</span> 秒）
+      </span>
+      <button id="skip-memory-btn" class="px-3 py-1 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 text-xs md:text-sm transition">
+        跳過記憶 ⏩
+      </button>
+    </div>
+    <div class="w-full bg-amber-200 rounded-full h-2.5 overflow-hidden">
+      <div id="memory-progress" class="bg-amber-500 h-2.5 rounded-full transition-all duration-1000 ease-linear" style="width: 100%;"></div>
+    </div>
+  </div>
+
+  <!-- 卡牌記憶網格 (主要區域，動態排版) -->
+  <main class="w-full max-w-2xl flex-1 flex items-center justify-center">
+    <div id="card-grid" class="grid grid-cols-4 gap-2 md:gap-4 w-full aspect-square max-h-[70vh]">
+      <!-- 卡牌動態生成於此 -->
+    </div>
+  </main>
+
+  <!-- 頁腳 -->
+  <footer class="mt-4 text-xs text-emerald-800 text-center font-semibold">
+    適合香港小二學生鞏固「12小時與24小時報時制」概念
+  </footer>
+
+  <!-- 🏠 1. 主選單 對話框 (開始遊戲 / 遊戲規則) -->
+  <div id="main-menu-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border-4 border-primary text-center flex flex-col items-center gap-6">
+      <div class="space-y-2">
+        <span class="text-5xl">⏰</span>
+        <h2 class="text-2xl md:text-3xl font-extrabold font-heading text-foreground">12/24小時制記憶對對碰</h2>
+        <p class="text-sm font-semibold text-emerald-800">歡迎來到卡牌記憶挑戰！</p>
+      </div>
+
+      <div class="flex flex-col gap-3 w-full">
+        <button id="menu-start-btn" class="w-full py-4 bg-primary text-foreground font-extrabold text-xl rounded-2xl shadow-lg hover:brightness-105 active:scale-95 transition flex items-center justify-center gap-2">
+          🚀 開始遊戲
+        </button>
+        <button id="menu-rules-btn" class="w-full py-3.5 bg-amber-100 text-amber-900 border-2 border-amber-300 font-extrabold text-lg rounded-2xl shadow hover:bg-amber-200 active:scale-95 transition flex items-center justify-center gap-2">
+          📖 遊戲規則
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🎯 2. 選擇難度 對話框 (按下開始遊戲後彈出) -->
+  <div id="diff-modal-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border-4 border-primary text-center flex flex-col items-center gap-5">
+      <div class="space-y-1">
+        <span class="text-4xl">🎯</span>
+        <h2 class="text-2xl md:text-3xl font-extrabold font-heading text-foreground">請選擇挑戰難度</h2>
+        <p class="text-xs md:text-sm font-semibold text-gray-500">點擊難度後將立即開始遊戲！</p>
+      </div>
+
+      <div class="flex flex-col gap-3 w-full my-1">
+        <button data-diff="easy" class="diff-option-btn p-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 active:scale-95 transition flex items-center justify-between font-bold text-foreground shadow-sm">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">🟢</span>
+            <div class="text-left">
+              <p class="text-base font-extrabold">簡單 (3x2)</p>
+              <p class="text-xs text-gray-500">3 對卡牌 (6張) | 15秒記憶 | 1分鐘</p>
+            </div>
+          </div>
+          <span class="text-xl">▶</span>
+        </button>
+
+        <button data-diff="medium" class="diff-option-btn p-4 rounded-2xl border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-95 transition flex items-center justify-between font-bold text-foreground shadow-sm">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">🟡</span>
+            <div class="text-left">
+              <p class="text-base font-extrabold">中等 (3x4)</p>
+              <p class="text-xs text-gray-500">6 對卡牌 (12張) | 20秒記憶 | 1分45秒</p>
+            </div>
+          </div>
+          <span class="text-xl">▶</span>
+        </button>
+
+        <button data-diff="hard" class="diff-option-btn p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-100 hover:bg-emerald-200 active:scale-95 transition flex items-center justify-between font-bold text-foreground shadow-sm">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">🔴</span>
+            <div class="text-left">
+              <p class="text-base font-extrabold">困難 (4x4)</p>
+              <p class="text-xs text-gray-500">8 對卡牌 (16張) | 30秒記憶 | 2分30秒</p>
+            </div>
+          </div>
+          <span class="text-xl">▶</span>
+        </button>
+      </div>
+
+      <button id="diff-back-btn" class="w-full py-3 bg-emerald-100 text-foreground font-extrabold text-base border-2 border-primary rounded-2xl shadow hover:bg-emerald-200 active:scale-95 transition">
+        🏠 返回主選單
+      </button>
+    </div>
+  </div>
+
+  <!-- 📖 3. 遊戲規則 對話框 -->
+  <div id="rules-modal-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl border-4 border-primary text-center flex flex-col items-center gap-5">
+      <div class="space-y-1">
+        <span class="text-4xl">📖</span>
+        <h2 class="text-2xl md:text-3xl font-extrabold font-heading text-foreground">遊戲規則與難度說明</h2>
+      </div>
+      
+      <div class="w-full bg-background rounded-2xl p-4 text-left text-foreground text-xs md:text-sm space-y-3 border border-emerald-200">
+        <p class="font-bold text-emerald-900 border-b border-emerald-200 pb-1">🎯 遊戲目標：</p>
+        <p class="text-emerald-800">配對對應的 <strong>12小時制</strong>（如：下午 2:30）與 <strong>24小時制</strong>（如：14:30）時間卡牌。</p>
+
+        <p class="font-bold text-emerald-900 border-b border-emerald-200 pb-1 pt-1">📊 三種難度設定：</p>
+        <ul class="list-disc list-inside space-y-1.5 text-emerald-800">
+          <li><strong>🟢 簡單（3x2）：</strong>3對卡牌 (6張) | 15秒記憶 | 限時 1 分鐘</li>
+          <li><strong>🟡 中等（3x4）：</strong>6對卡牌 (12張) | 20秒記憶 | 限時 1分45秒</li>
+          <li><strong>🔴 困難（4x4）：</strong>8對卡牌 (16張) | 30秒記憶 | 限時 2分30秒</li>
+        </ul>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-3 w-full">
+        <button id="rules-start-btn" class="flex-1 py-3.5 bg-primary text-foreground font-extrabold text-lg rounded-2xl shadow-lg hover:brightness-105 active:scale-95 transition">
+          🚀 選擇難度開始
+        </button>
+        <button id="rules-back-btn" class="flex-1 py-3.5 bg-emerald-100 text-foreground font-extrabold text-lg border-2 border-primary rounded-2xl shadow hover:bg-emerald-200 active:scale-95 transition">
+          🏠 返回主選單
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⏸️ 4. 遊戲暫停 對話框 -->
+  <div id="pause-modal-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border-4 border-amber-400 text-center flex flex-col items-center gap-5">
+      <div class="space-y-1">
+        <span class="text-5xl">⏸️</span>
+        <h2 class="text-2xl md:text-3xl font-extrabold font-heading text-foreground">遊戲暫停中</h2>
+        <p class="text-sm font-semibold text-gray-500">休息一下，準備好了隨時繼續！</p>
+      </div>
+
+      <div class="flex flex-col gap-3 w-full">
+        <button id="pause-resume-btn" class="w-full py-3.5 bg-primary text-foreground font-extrabold text-lg rounded-2xl shadow-lg hover:brightness-105 active:scale-95 transition flex items-center justify-center gap-2">
+          ▶️ 繼續遊戲
+        </button>
+        <button id="pause-restart-btn" class="w-full py-3 bg-accent text-white font-extrabold text-base rounded-2xl shadow hover:opacity-90 active:scale-95 transition flex items-center justify-center gap-2">
+          🔄 重新開始遊戲
+        </button>
+        <button id="pause-menu-btn" class="w-full py-3 bg-emerald-100 text-foreground font-extrabold text-base border-2 border-primary rounded-2xl shadow hover:bg-emerald-200 active:scale-95 transition flex items-center justify-center gap-2">
+          🏠 返回主選單
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 超大 3 2 1 開始 倒數覆蓋層 -->
+  <div id="countdown-overlay" class="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center z-50 hidden">
+    <div id="countdown-text" class="text-[10rem] md:text-[14rem] font-black font-heading text-amber-400 drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)] tracking-wider">
+      3
+    </div>
+  </div>
+
+  <!-- 🏆 5. 通關/失敗 結算對話框 -->
+  <div id="modal-overlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center hidden z-40 p-4">
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border-4 border-primary text-center flex flex-col items-center gap-4">
+      <h2 id="modal-title" class="text-3xl font-extrabold font-heading text-foreground">🎉 恭喜通關！</h2>
+      
+      <!-- 星級評分 -->
+      <div id="star-rating" class="text-4xl flex gap-2">
+        <span>⭐</span><span>⭐</span><span>⭐</span>
+      </div>
+
+      <!-- 統計數據 -->
+      <div class="w-full bg-background rounded-2xl p-4 flex justify-around text-foreground font-semibold my-2 border border-emerald-200">
+        <div>
+          <p class="text-xs text-gray-500">耗費時間</p>
+          <p id="modal-time" class="text-xl font-bold font-heading">00:45</p>
+        </div>
+        <div class="w-px bg-gray-300"></div>
+        <div>
+          <p class="text-xs text-gray-500">翻牌次數</p>
+          <p id="modal-moves" class="text-xl font-bold font-heading">12 次</p>
+        </div>
+      </div>
+
+      <p id="modal-feedback" class="text-sm font-semibold text-emerald-800">太棒了！你已經完全掌握 12 與 24 小時制的換算！</p>
+
+      <!-- 結算選項：下一個難度、重新開始遊戲 與 返回主選單 -->
+      <div class="flex flex-col gap-2.5 w-full mt-2">
+        <button id="modal-next-btn" class="w-full py-3.5 bg-amber-400 text-amber-950 font-extrabold text-base rounded-2xl shadow-lg hover:brightness-105 active:scale-95 transition hidden flex items-center justify-center gap-2">
+          ⏩ 挑戰下一個難度
+        </button>
+        <div class="flex flex-col sm:flex-row gap-2 w-full">
+          <button id="modal-restart-btn" class="flex-1 py-3 bg-primary text-foreground font-extrabold text-base rounded-2xl shadow-lg hover:brightness-105 active:scale-95 transition">
+            🔄 重新開始遊戲
+          </button>
+          <button id="modal-menu-btn" class="flex-1 py-3 bg-emerald-100 text-foreground font-extrabold text-base border-2 border-primary rounded-2xl shadow hover:bg-emerald-200 active:scale-95 transition">
+            🏠 返回主選單
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 音效模組 (Web Audio API 安全防護) ---
+    class SoundEffects {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        try {
+          if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+          }
+        } catch (e) {
+          console.warn('Web Audio API 初始化受阻:', e);
+        }
+      }
+
+      playFlip() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.1);
+          gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.1);
+        } catch (e) {}
+      }
+
+      playMatch() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const notes = [523.25, 659.25, 783.99, 1046.50];
+          notes.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.2, now + idx * 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.25);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.08);
+            osc.stop(now + idx * 0.08 + 0.25);
+          });
+        } catch (e) {}
+      }
+
+      playMismatch() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.setValueAtTime(180, now + 0.12);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        } catch (e) {}
+      }
+
+      playWin() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const notes = [523.25, 659.25, 783.99, 987.77, 1046.50];
+          notes.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.25, now + idx * 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.1 + 0.4);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.1);
+            osc.stop(now + idx * 0.1 + 0.4);
+          });
+        } catch (e) {}
+      }
+
+      playGameOver() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const notes = [300, 260, 220, 180];
+          notes.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.2, now + idx * 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.15 + 0.25);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.15);
+            osc.stop(now + idx * 0.15 + 0.25);
+          });
+        } catch (e) {}
+      }
+    }
+
+    const sound = new SoundEffects();
+
+    // --- 難度設定檔 ---
+    const DIFFICULTY_CONFIG = {
+      easy: {
+        name: '簡單 (3x2)',
+        colsClass: 'grid-cols-2', // 2 欄 3 列 = 6 張卡牌
+        pairsCount: 3,      // 3 對卡牌 (6張)
+        gameTime: 60,       // 1 分鐘
+        memoryTime: 15,     // 15 秒記憶
+        starThresholds: { three: 4, two: 6 }
+      },
+      medium: {
+        name: '中等 (3x4)',
+        colsClass: 'grid-cols-4', // 4 欄 3 列 = 12 張卡牌
+        pairsCount: 6,      // 6 對卡牌 (12張)
+        gameTime: 105,      // 1 分 45 秒
+        memoryTime: 20,     // 20 秒記憶
+        starThresholds: { three: 9, two: 13 }
+      },
+      hard: {
+        name: '困難 (4x4)',
+        colsClass: 'grid-cols-4', // 4 欄 4 列 = 16 張卡牌
+        pairsCount: 8,      // 8 對卡牌 (16張)
+        gameTime: 150,      // 2 分 30 秒
+        memoryTime: 30,     // 30 秒記憶
+        starThresholds: { three: 12, two: 18 }
+      }
+    };
+
+    let selectedDifficultyKey = 'hard';
+    let nextDifficultyKey = null;
+
+    // --- 隨機題目生成器 ---
+    function generateRandomPairs(count) {
+      const templates = [
+        { type: 'midnight', minH: 0, maxH: 0 },
+        { type: 'morning_single', minH: 1, maxH: 9 },
+        { type: 'morning_double', minH: 10, maxH: 11 },
+        { type: 'noon', minH: 12, maxH: 12 },
+        { type: 'afternoon_1', minH: 13, maxH: 15 },
+        { type: 'afternoon_2', minH: 16, maxH: 18 },
+        { type: 'evening_1', minH: 19, maxH: 21 },
+        { type: 'night_2', minH: 22, maxH: 23 }
+      ];
+
+      const shuffledTemplates = shuffle(templates).slice(0, count);
+
+      return shuffledTemplates.map((tpl, index) => {
+        const hour24 = Math.floor(Math.random() * (tpl.maxH - tpl.minH + 1)) + tpl.minH;
+        const minute = Math.floor(Math.random() * 60);
+
+        const pad = (num) => String(num).padStart(2, '0');
+        const strMin = pad(minute);
+
+        let str12 = '';
+        if (hour24 === 0) {
+          str12 = `午夜 12:${strMin}`;
+        } else if (hour24 < 12) {
+          str12 = `上午 ${hour24}:${strMin}`;
+        } else if (hour24 === 12) {
+          str12 = `中午 12:${strMin}`;
+        } else {
+          const h12 = hour24 - 12;
+          const period = hour24 >= 18 ? '晚上' : '下午';
+          str12 = `${period} ${h12}:${strMin}`;
+        }
+
+        const str24 = `${pad(hour24)}:${strMin}`;
+
+        return {
+          pairId: index,
+          val12: str12,
+          val24: str24
+        };
+      });
+    }
+
+    // --- 遊戲主邏輯變數 ---
+    let cards = [];
+    let flippedCards = [];
+    let matchedCount = 0;
+    let targetMatches = 8;
+    let moves = 0;
+    let isLocked = false;
+    let isMemoryPhase = false;
+    let isPaused = false;
+    let isCountingDown = false;
+
+    let gameTimer = null;
+    let memoryTimer = null;
+    let matchTimeout = null;
+    let countdownInterval = null;
+    let secondsLeft = 150;
+    let memorySecondsLeft = 30;
+
+    // --- DOM 元素引用 ---
+    const cardGrid = document.getElementById('card-grid');
+    const difficultyDisplay = document.getElementById('difficulty-display');
+    const timerDisplay = document.getElementById('timer-display');
+    const movesDisplay = document.getElementById('moves-display');
+    const matchesDisplay = document.getElementById('matches-display');
+    const soundToggle = document.getElementById('sound-toggle');
+    const pauseBtn = document.getElementById('pause-btn');
+    const restartBtn = document.getElementById('restart-btn');
+    const headerMenuBtn = document.getElementById('header-menu-btn');
+    const memoryBanner = document.getElementById('memory-banner');
+    const memoryCountdown = document.getElementById('memory-countdown');
+    const memoryProgress = document.getElementById('memory-progress');
+    const skipMemoryBtn = document.getElementById('skip-memory-btn');
+    
+    const mainMenuOverlay = document.getElementById('main-menu-overlay');
+    const menuStartBtn = document.getElementById('menu-start-btn');
+    const menuRulesBtn = document.getElementById('menu-rules-btn');
+
+    const diffModalOverlay = document.getElementById('diff-modal-overlay');
+    const diffOptionBtns = document.querySelectorAll('.diff-option-btn');
+    const diffBackBtn = document.getElementById('diff-back-btn');
+
+    const rulesModalOverlay = document.getElementById('rules-modal-overlay');
+    const rulesStartBtn = document.getElementById('rules-start-btn');
+    const rulesBackBtn = document.getElementById('rules-back-btn');
+
+    const pauseModalOverlay = document.getElementById('pause-modal-overlay');
+    const pauseResumeBtn = document.getElementById('pause-resume-btn');
+    const pauseRestartBtn = document.getElementById('pause-restart-btn');
+    const pauseMenuBtn = document.getElementById('pause-menu-btn');
+
+    const countdownOverlay = document.getElementById('countdown-overlay');
+    const countdownText = document.getElementById('countdown-text');
+    
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalTitle = document.getElementById('modal-title');
+    const modalTime = document.getElementById('modal-time');
+    const modalMoves = document.getElementById('modal-moves');
+    const modalFeedback = document.getElementById('modal-feedback');
+    const modalNextBtn = document.getElementById('modal-next-btn');
+    const modalRestartBtn = document.getElementById('modal-restart-btn');
+    const modalMenuBtn = document.getElementById('modal-menu-btn');
+    const starRating = document.getElementById('star-rating');
+
+    // 清除所有運行中的計時器，防止背景衝突
+    function clearAllTimers() {
+      if (gameTimer) clearInterval(gameTimer);
+      if (memoryTimer) clearInterval(memoryTimer);
+      if (countdownInterval) clearInterval(countdownInterval);
+      if (matchTimeout) clearTimeout(matchTimeout);
+      gameTimer = null;
+      memoryTimer = null;
+      countdownInterval = null;
+      matchTimeout = null;
+    }
+
+    // --- 開啟主選單 ---
+    function openMainMenu() {
+      clearAllTimers();
+
+      isPaused = false;
+      isCountingDown = false;
+
+      diffModalOverlay.classList.add('hidden');
+      rulesModalOverlay.classList.add('hidden');
+      pauseModalOverlay.classList.add('hidden');
+      modalOverlay.classList.add('hidden');
+      countdownOverlay.classList.add('hidden');
+      memoryBanner.classList.add('hidden');
+
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+      timerDisplay.textContent = formatTime(config.gameTime);
+      timerDisplay.classList.remove('timer-warning');
+      movesDisplay.textContent = '0';
+      matchesDisplay.textContent = `0 / ${config.pairsCount}`;
+
+      mainMenuOverlay.classList.remove('hidden');
+    }
+
+    // --- 開啟難度選擇選單 ---
+    function openDiffMenu() {
+      clearAllTimers();
+
+      isPaused = false;
+      isCountingDown = false;
+
+      mainMenuOverlay.classList.add('hidden');
+      rulesModalOverlay.classList.add('hidden');
+      pauseModalOverlay.classList.add('hidden');
+      modalOverlay.classList.add('hidden');
+      countdownOverlay.classList.add('hidden');
+
+      diffModalOverlay.classList.remove('hidden');
+    }
+
+    // --- 開啟遊戲規則選單 ---
+    function openRulesMenu() {
+      mainMenuOverlay.classList.add('hidden');
+      rulesModalOverlay.classList.remove('hidden');
+    }
+
+    // 點選難度按鈕並直接開始遊戲
+    diffOptionBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        sound.init();
+        selectedDifficultyKey = btn.dataset.diff;
+        startNewGameProcess();
+      });
+    });
+
+    // --- 暫停與繼續邏輯 ---
+    function pauseGame() {
+      if (isPaused || isCountingDown || !mainMenuOverlay.classList.contains('hidden') || !diffModalOverlay.classList.contains('hidden') || !rulesModalOverlay.classList.contains('hidden') || !modalOverlay.classList.contains('hidden')) return;
+
+      isPaused = true;
+      if (gameTimer) clearInterval(gameTimer);
+      if (memoryTimer) clearInterval(memoryTimer);
+
+      pauseModalOverlay.classList.remove('hidden');
+    }
+
+    function resumeGame() {
+      if (!isPaused) return;
+
+      isPaused = false;
+      pauseModalOverlay.classList.add('hidden');
+
+      if (isMemoryPhase) {
+        startMemoryTimerInterval();
+      } else {
+        startMainTimerInterval();
+      }
+    }
+
+    // --- 執行 3 2 1 開始 倒數 ---
+    function run321Countdown(onComplete) {
+      isCountingDown = true;
+      countdownOverlay.classList.remove('hidden');
+      let count = 3;
+
+      const updateDisplay = (text, isStart = false) => {
+        countdownText.textContent = text;
+        if (isStart) {
+          countdownText.className = "text-[6rem] md:text-[10rem] font-black font-heading text-primary drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)] tracking-wider animate-pop";
+        } else {
+          countdownText.className = "text-[10rem] md:text-[14rem] font-black font-heading text-amber-400 drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)] tracking-wider animate-pop";
+        }
+        countdownText.classList.remove('animate-pop');
+        void countdownText.offsetWidth;
+        countdownText.classList.add('animate-pop');
+      };
+
+      updateDisplay(count);
+      sound.playFlip();
+
+      countdownInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          updateDisplay(count);
+          sound.playFlip();
+        } else if (count === 0) {
+          updateDisplay('開始！', true);
+          sound.playMatch();
+        } else {
+          clearInterval(countdownInterval);
+          countdownOverlay.classList.add('hidden');
+          isCountingDown = false;
+          if (onComplete) onComplete();
+        }
+      }, 850);
+    }
+
+    // --- 開始/重置遊戲流程 ---
+    function startNewGameProcess() {
+      clearAllTimers();
+
+      isPaused = false;
+      isCountingDown = false;
+
+      mainMenuOverlay.classList.add('hidden');
+      diffModalOverlay.classList.add('hidden');
+      rulesModalOverlay.classList.add('hidden');
+      pauseModalOverlay.classList.add('hidden');
+      modalOverlay.classList.add('hidden');
+
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+      difficultyDisplay.textContent = config.name;
+
+      // 生成題目卡牌
+      const pairs = generateRandomPairs(config.pairsCount);
+      let cardDataList = [];
+      pairs.forEach(p => {
+        cardDataList.push({ pairId: p.pairId, text: p.val12, type: '12h' });
+        cardDataList.push({ pairId: p.pairId, text: p.val24, type: '24h' });
+      });
+
+      cards = shuffle(cardDataList);
+      
+      // 更新網格 Class
+      cardGrid.className = `grid ${config.colsClass} gap-2 md:gap-4 w-full aspect-square max-h-[70vh]`;
+
+      renderCards();
+
+      secondsLeft = config.gameTime;
+      memorySecondsLeft = config.memoryTime;
+      targetMatches = config.pairsCount;
+
+      timerDisplay.textContent = formatTime(secondsLeft);
+      timerDisplay.classList.remove('timer-warning');
+      movesDisplay.textContent = '0';
+      matchesDisplay.textContent = `0 / ${targetMatches}`;
+
+      run321Countdown(() => {
+        initGamePhase();
+      });
+    }
+
+    // --- 初始化記憶階段 ---
+    function initGamePhase() {
+      flippedCards = [];
+      matchedCount = 0;
+      moves = 0;
+      isLocked = true;
+
+      startMemoryPhase();
+    }
+
+    // 洗牌算法 (Fisher-Yates)
+    function shuffle(array) {
+      let arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // 格式化時間 (秒 -> MM:SS)
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // 渲染卡牌
+    function renderCards() {
+      cardGrid.innerHTML = '';
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+
+      // 根據難度動態調節字型大小
+      let textSizeClass = 'text-base md:text-xl';
+      if (selectedDifficultyKey === 'easy') {
+        textSizeClass = 'text-xl md:text-3xl';
+      } else if (selectedDifficultyKey === 'medium') {
+        textSizeClass = 'text-lg md:text-2xl';
+      }
+
+      cards.forEach((card, index) => {
+        const cardContainer = document.createElement('div');
+        cardContainer.className = 'card-container w-full h-full cursor-pointer flipped';
+        cardContainer.dataset.index = index;
+
+        const is12h = card.type === '12h';
+        const tagBg = is12h ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
+        const tagText = is12h ? '☀️ 12小時制' : '⏱️ 24小時制';
+
+        cardContainer.innerHTML = `
+          <div class="card-inner">
+            <div class="card-back">
+              <span class="text-white font-extrabold font-heading text-2xl md:text-3xl">?</span>
+            </div>
+            <div class="card-front p-2 flex flex-col justify-between items-center select-none">
+              <span class="text-[10px] md:text-xs font-bold px-2 py-0.5 rounded-full ${tagBg}">
+                ${tagText}
+              </span>
+              <span class="${textSizeClass} font-black font-heading text-foreground my-auto tracking-tight">
+                ${card.text}
+              </span>
+            </div>
+          </div>
+        `;
+
+        cardContainer.addEventListener('click', () => handleCardClick(cardContainer, index));
+        cardGrid.appendChild(cardContainer);
+      });
+    }
+
+    // 開局記憶階段
+    function startMemoryPhase() {
+      isMemoryPhase = true;
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+      memoryBanner.classList.remove('hidden');
+      memoryCountdown.textContent = memorySecondsLeft;
+      memoryProgress.style.width = `${(memorySecondsLeft / config.memoryTime) * 100}%`;
+
+      startMemoryTimerInterval();
+    }
+
+    function startMemoryTimerInterval() {
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+      if (memoryTimer) clearInterval(memoryTimer);
+      memoryTimer = setInterval(() => {
+        memorySecondsLeft--;
+        memoryCountdown.textContent = memorySecondsLeft;
+        memoryProgress.style.width = `${(memorySecondsLeft / config.memoryTime) * 100}%`;
+
+        if (memorySecondsLeft <= 0) {
+          endMemoryPhase();
+        }
+      }, 1000);
+    }
+
+    // 結束記憶階段，正式開始遊戲
+    function endMemoryPhase() {
+      if (memoryTimer) clearInterval(memoryTimer);
+      isMemoryPhase = false;
+      memoryBanner.classList.add('hidden');
+
+      const allCards = document.querySelectorAll('.card-container');
+      allCards.forEach(c => c.classList.remove('flipped'));
+
+      isLocked = false;
+      startMainTimer();
+    }
+
+    // 主遊戲計時器
+    function startMainTimer() {
+      startMainTimerInterval();
+    }
+
+    function startMainTimerInterval() {
+      if (gameTimer) clearInterval(gameTimer);
+      gameTimer = setInterval(() => {
+        secondsLeft--;
+        timerDisplay.textContent = formatTime(secondsLeft);
+
+        if (secondsLeft <= 30) {
+          timerDisplay.classList.add('timer-warning');
+        }
+
+        if (secondsLeft <= 0) {
+          clearInterval(gameTimer);
+          handleGameOver(false);
+        }
+      }, 1000);
+    }
+
+    // 卡牌點擊處理
+    function handleCardClick(element, index) {
+      if (isLocked || isMemoryPhase || isPaused || isCountingDown) return;
+      if (element.classList.contains('flipped') || element.classList.contains('card-matched')) return;
+
+      const cardData = cards[index];
+
+      sound.playFlip();
+      element.classList.add('flipped');
+      flippedCards.push({ element, index, data: cardData });
+
+      if (flippedCards.length === 2) {
+        moves++;
+        movesDisplay.textContent = moves;
+        checkMatch();
+      }
+    }
+
+    // 配對比對邏輯
+    function checkMatch() {
+      isLocked = true;
+      const [card1, card2] = flippedCards;
+
+      const isMatch = (card1.data.pairId === card2.data.pairId) && (card1.data.type !== card2.data.type);
+
+      matchTimeout = setTimeout(() => {
+        if (isMatch) {
+          sound.playMatch();
+          card1.element.classList.add('card-matched');
+          card2.element.classList.add('card-matched');
+          matchedCount++;
+          matchesDisplay.textContent = `${matchedCount} / ${targetMatches}`;
+
+          flippedCards = [];
+          isLocked = false;
+
+          if (matchedCount === targetMatches) {
+            handleGameOver(true);
+          }
+        } else {
+          sound.playMismatch();
+          card1.element.classList.remove('flipped');
+          card2.element.classList.remove('flipped');
+          flippedCards = [];
+          isLocked = false;
+        }
+      }, 1200);
+    }
+
+    // 遊戲結算 (成功 / 失敗)
+    function handleGameOver(isWin) {
+      clearAllTimers();
+
+      const config = DIFFICULTY_CONFIG[selectedDifficultyKey];
+
+      if (isWin) {
+        sound.playWin();
+        triggerConfetti();
+
+        const timeSpent = config.gameTime - secondsLeft;
+        modalTitle.textContent = '🎉 恭喜通關！';
+        modalTime.textContent = formatTime(timeSpent);
+        modalMoves.textContent = `${moves} 次`;
+
+        // 計算評分
+        if (moves <= config.starThresholds.three) {
+          starRating.innerHTML = '⭐ ⭐ ⭐';
+          modalFeedback.textContent = '太厲害了！你的記憶力與報時制換算超完美！';
+        } else if (moves <= config.starThresholds.two) {
+          starRating.innerHTML = '⭐ ⭐ 🌟';
+          modalFeedback.textContent = '表現非常棒！對 12 與 24 小時制相當熟悉！';
+        } else {
+          starRating.innerHTML = '⭐ 🌟 🌟';
+          modalFeedback.textContent = '成功通關！多加練習換算會更加快捷喔！';
+        }
+
+        // 設定「挑戰下一個難度」邏輯
+        if (selectedDifficultyKey === 'easy') {
+          nextDifficultyKey = 'medium';
+          modalNextBtn.textContent = '⏩ 挑戰中等難度 (3x4)';
+          modalNextBtn.classList.remove('hidden');
+        } else if (selectedDifficultyKey === 'medium') {
+          nextDifficultyKey = 'hard';
+          modalNextBtn.textContent = '⏩ 挑戰困難難度 (4x4)';
+          modalNextBtn.classList.remove('hidden');
+        } else {
+          nextDifficultyKey = null;
+          modalNextBtn.classList.add('hidden');
+        }
+      } else {
+        sound.playGameOver();
+        modalTitle.textContent = '⏰ 時間到！加油！';
+        starRating.innerHTML = '💪 💪 💪';
+        modalTime.textContent = formatTime(config.gameTime);
+        modalMoves.textContent = `${moves} 次`;
+        modalFeedback.textContent = '別灰心，多練習幾次，你一定能完全掌握！';
+
+        nextDifficultyKey = null;
+        modalNextBtn.classList.add('hidden');
+      }
+
+      modalOverlay.classList.remove('hidden');
+    }
+
+    // --- 原生 Canvas 彩帶慶祝動畫 ---
+    function triggerConfetti() {
+      const canvas = document.getElementById('confetti-canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const particles = [];
+      const colors = ['#06D6A0', '#EF476F', '#FFD166', '#118AB2', '#073B4C'];
+
+      for (let i = 0; i < 120; i++) {
+        particles.push({
+          x: canvas.width / 2,
+          y: canvas.height / 2,
+          vx: (Math.random() - 0.5) * 12,
+          vy: (Math.random() - 0.7) * 12,
+          size: Math.random() * 8 + 4,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          rotation: Math.random() * 360,
+          rotSpeed: (Math.random() - 0.5) * 10
+        });
+      }
+
+      const render = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+
+        particles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.2;
+          p.rotation += p.rotSpeed;
+
+          if (p.y < canvas.height) alive = true;
+
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rotation * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+          ctx.restore();
+        });
+
+        if (alive) {
+          requestAnimationFrame(render);
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      };
+
+      render();
+    }
+
+    // --- 事件監聽器綁定 ---
+    soundToggle.addEventListener('click', () => {
+      sound.enabled = !sound.enabled;
+      soundToggle.textContent = sound.enabled ? '🔊 音效：開啟' : '🔇 音效：關閉';
+      if (sound.enabled) sound.playFlip();
+    });
+
+    skipMemoryBtn.addEventListener('click', () => {
+      endMemoryPhase();
+    });
+
+    // 控制列按鈕
+    pauseBtn.addEventListener('click', () => {
+      sound.init();
+      pauseGame();
+    });
+
+    restartBtn.addEventListener('click', () => {
+      sound.init();
+      openDiffMenu();
+    });
+
+    headerMenuBtn.addEventListener('click', () => {
+      sound.init();
+      openMainMenu();
+    });
+
+    // 主選單按鈕
+    menuStartBtn.addEventListener('click', () => {
+      sound.init();
+      openDiffMenu();
+    });
+
+    menuRulesBtn.addEventListener('click', () => {
+      sound.init();
+      openRulesMenu();
+    });
+
+    // 難度選擇選單按鈕
+    diffBackBtn.addEventListener('click', () => {
+      sound.init();
+      openMainMenu();
+    });
+
+    // 規則選單按鈕
+    rulesStartBtn.addEventListener('click', () => {
+      sound.init();
+      openDiffMenu();
+    });
+
+    rulesBackBtn.addEventListener('click', () => {
+      sound.init();
+      openMainMenu();
+    });
+
+    // 暫停選單按鈕
+    pauseResumeBtn.addEventListener('click', () => {
+      sound.init();
+      resumeGame();
+    });
+
+    pauseRestartBtn.addEventListener('click', () => {
+      sound.init();
+      startNewGameProcess();
+    });
+
+    pauseMenuBtn.addEventListener('click', () => {
+      sound.init();
+      openMainMenu();
+    });
+
+    // 結算畫面按鈕
+    modalNextBtn.addEventListener('click', () => {
+      if (nextDifficultyKey) {
+        sound.init();
+        selectedDifficultyKey = nextDifficultyKey;
+        startNewGameProcess();
+      }
+    });
+
+    modalRestartBtn.addEventListener('click', () => {
+      sound.init();
+      startNewGameProcess();
+    });
+
+    modalMenuBtn.addEventListener('click', () => {
+      sound.init();
+      openMainMenu();
+    });
+  </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"480c9d8468c44ad3bed3c74fbcc6d6f3","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
+
